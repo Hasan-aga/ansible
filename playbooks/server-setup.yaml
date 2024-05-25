@@ -66,3 +66,8 @@
         name: fail2ban
         enabled: yes
         state: started
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
