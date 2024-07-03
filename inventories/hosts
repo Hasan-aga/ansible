@@ -1,2 +1,5 @@
 [raspberrypi]
 raspberrypi ansible_port=22 ansible_user=hasan
+
+[local]
+localhost ansible_connection=local

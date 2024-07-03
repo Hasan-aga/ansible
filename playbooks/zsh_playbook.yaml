@@ -1,37 +1,37 @@
 - name: Install Zsh
-  hosts: local
-  connection: local
+  hosts: all
+  become: true
+  vars:
+    user: "{{ ansible_user_id }}"
   tasks:
     - name: Install ZSH
-      become: true
       ansible.builtin.package:
         name: zsh
         state: present
 
-    - name: Override powerline fonts package name for Debian.
+    - name: Set Zsh as default shell
+      ansible.builtin.command: chsh -s $(which zsh) {{ user }}
+      become: true
+
+    - name: Set powerline fonts package name
       ansible.builtin.set_fact:
-        powerlinefonts: fonts-powerline
-      when: ansible_os_family == 'Debian'
+        powerlinefonts: "{{ 'fonts-powerline' if ansible_os_family == 'Debian' else 'powerline-fonts' }}"
 
     - name: Install Powerline fonts
-      become: true
       ansible.builtin.package:
         state: present
         name: "{{ powerlinefonts }}"
 
-    - name: Install Oh My Zsh # noqa: latest
+    - name: Install Oh My Zsh
       ansible.builtin.git:
         repo: https://github.com/ohmyzsh/ohmyzsh.git
-        dest: /home/hasan/.oh-my-zsh
+        dest: "/home/{{ user }}/.oh-my-zsh"
         depth: 1
+      become: false
 
-    - name: Install zsh-autosuggestions plugin # noqa: latest
+    - name: Install zsh-autosuggestions plugin
       ansible.builtin.git:
         repo: https://github.com/zsh-users/zsh-autosuggestions
-        dest: /home/hasan/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+        dest: "/home/{{ user }}/.oh-my-zsh/custom/plugins/zsh-autosuggestions"
         depth: 1
-
-    - name: Change user shell to zsh
-      ansible.builtin.user:
-        name: hasan
-        shell: /bin/zsh
+      become: false
