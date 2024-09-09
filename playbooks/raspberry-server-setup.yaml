@@ -1,42 +1,68 @@
+---
 - hosts: raspberrypi
   become: true
+  vars:
+    docker_compose_version: "v2.17.2"
   tasks:
+    - name: Get OS and architecture information
+      debug:
+        msg:
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Architecture: {{ ansible_architecture }}"
+
+    - name: Set architecture fact
+      set_fact:
+        docker_arch: "{% if ansible_architecture == 'aarch64' %}arm64{% else %}armhf{% endif %}"
+
     - name: Update package lists
-      apt: update_cache=yes
+      apt:
+        update_cache: yes
 
     - name: Install prerequisites
       apt:
-        name: "{{ item }}"
+        name:
+          - build-essential
+          - libssl-dev
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - python3-pip
         state: present
-      with_items:
-        - build-essential
-        - libssl-dev
-        - apt-transport-https
-        - ca-certificates
-        - curl
-        - gnupg
 
     - name: Add Docker GPG key
-      shell: curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add -
+      apt_key:
+        url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+        state: present
 
     - name: Add Docker repository
       apt_repository:
-        repo: deb [arch=armhf] https://download.docker.com/linux/raspbian buster stable
+        repo: "deb [arch={{ docker_arch }}] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
         state: present
 
     - name: Update package lists again
-      apt: update_cache=yes
+      apt:
+        update_cache: yes
 
-    - name: Install Docker components
+    - name: Install Docker
       apt:
         name:
           - docker-ce
           - docker-ce-cli
           - containerd.io
-          - docker-buildx-plugin
-          - docker-compose-plugin
         state: present
-        update_cache: yes
+      register: docker_install
+      ignore_errors: yes
+
+    - name: Install Docker using convenience script (if apt install fails)
+      shell: curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh
+      when: docker_install.failed
+
+    - name: Install Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-{{ docker_arch }}"
+        dest: /usr/local/bin/docker-compose
+        mode: "0755"
 
     - name: Create Docker group
       group:
@@ -50,18 +76,25 @@
         append: yes
 
     - name: Install Portainer
-      shell: |
-        docker volume create portainer_data
-        docker run -d -p 8000:8000 -p 9443:9443 -p 9000:9000 --name portainer --restart=always -v /var/run/docker.sock:/var/run/docker.sock -v portainer_data:/data portainer/portainer-ce:latest
-      register: install_portainer
-      changed_when: install_portainer.rc == 0
+      docker_container:
+        name: portainer
+        image: portainer/portainer-ce:latest
+        state: started
+        restart_policy: always
+        ports:
+          - "8000:8000"
+          - "9000:9000"
+          - "9443:9443"
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - portainer_data:/data
 
     - name: Install Fail2ban
       apt:
         name: fail2ban
         state: present
 
-    - name: Enable Fail2ban service
+    - name: Enable and start Fail2ban service
       systemd:
         name: fail2ban
         enabled: yes
@@ -71,3 +104,21 @@
       apt:
         name: nginx
         state: present
+
+    - name: Enable and start Nginx service
+      systemd:
+        name: nginx
+        enabled: yes
+        state: started
+
+    - name: Reboot the system
+      reboot:
+
+    - name: Wait for the reboot to complete
+      wait_for_connection:
+        delay: 60
+        timeout: 300
+
+    - name: Print completion message
+      debug:
+        msg: "Setup complete. Portainer is available at http://{{ ansible_host }}:9000"
